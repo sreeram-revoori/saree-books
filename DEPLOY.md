@@ -24,6 +24,11 @@ When you're done:
 
 The app signs in to Google with its own account that can only open sheets you share with it.
 
+> **No payment needed.** Google will keep offering a "$300 free trial" — ignore it
+> (close / Dismiss). Nothing here uses the trial or needs a card: the project, the service
+> account and the Sheets/Drive APIs are free on a normal Gmail account. If creating the
+> project asks for a billing account, choose **No billing account**.
+
 1. Go to <https://console.cloud.google.com/> and accept the terms if asked.
 2. Top bar → project picker → **New project** → name it `saree-books` → **Create**, and select it.
 3. Turn on the two APIs (click each, then **Enable**):
