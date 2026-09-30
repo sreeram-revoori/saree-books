@@ -68,12 +68,9 @@ settings for Streamlit. Then delete the downloaded `.json` file.
    private in Step 5. (The free plan allows one private app — this one.)
    - Repository: your repo, Branch: `main`, Main file: `app.py`
    - App URL: pick a name, e.g. `saree-books`
-   - **Advanced settings** → Python version **3.12**, and in **Secrets** paste the contents of
-     `.streamlit/secrets.toml.example` filled in:
-     - `spreadsheet` = the Google Sheet's link
-     - `app_password` = a password to open the app (or delete that line)
-     - under `[gcp_service_account]`, copy each value from the downloaded `.json` file.
-       Keep the `\n`s in `private_key` exactly as they are in the file.
+   - **Advanced settings** → Python version **3.12**, and in **Secrets** paste what
+     `make_secrets.py` copied (or the contents of `.streamlit/secrets.toml`).
+     Never type real values into `secrets.toml.example` or any file on GitHub.
 3. **Deploy**. First start takes a few minutes.
 
 ## Step 5 — Keep it private
