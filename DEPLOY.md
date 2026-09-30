@@ -46,7 +46,18 @@ The app signs in to Google with its own account that can only open sheets you sh
 In the Google Sheet: **Share** → paste the service account email → **Editor** → untick
 "Notify people" → **Share**.
 
-## Step 4 — Put the code on GitHub and deploy on Streamlit
+## Step 4 — Make the settings file, then deploy on Streamlit
+
+First, in Terminal, in this folder, run (use the path of the key file you downloaded):
+
+```
+.venv/bin/python make_secrets.py ~/Downloads/saree-books-xxxxxxxx.json
+```
+
+It asks for the Google Sheet link and an app password, writes `.streamlit/secrets.toml`
+on this computer (never uploaded), checks it can open the sheet, and offers to copy the
+settings for Streamlit. Then delete the downloaded `.json` file.
+
 
 1. The code is in the **private** GitHub repository `sreeram-revoori/saree-books`.
    `.gitignore` keeps the Excel file, backups and `secrets.toml` out of GitHub.
