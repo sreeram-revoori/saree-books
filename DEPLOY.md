@@ -48,10 +48,13 @@ In the Google Sheet: **Share** → paste the service account email → **Editor*
 
 ## Step 4 — Put the code on GitHub and deploy on Streamlit
 
-1. Put this folder in a **private** GitHub repository (Claude can do this for you).
-   `.gitignore` already keeps the Excel file, backups and secrets out of GitHub.
-2. Go to <https://share.streamlit.io>, sign in with GitHub, click **Create app →
-   Deploy a public app from GitHub**:
+1. The code is in the **private** GitHub repository `sreeram-revoori/saree-books`.
+   `.gitignore` keeps the Excel file, backups and `secrets.toml` out of GitHub.
+2. Go to <https://share.streamlit.io>, sign in with GitHub. When GitHub asks what Streamlit
+   may access, **allow private repositories** (otherwise `saree-books` won't be listed).
+   Click **Create app → Deploy a public app from GitHub** — "public app" is just
+   Streamlit's name for the free option; the repository stays private and the app is made
+   private in Step 5. (The free plan allows one private app — this one.)
    - Repository: your repo, Branch: `main`, Main file: `app.py`
    - App URL: pick a name, e.g. `saree-books`
    - **Advanced settings** → Python version **3.12**, and in **Secrets** paste the contents of
