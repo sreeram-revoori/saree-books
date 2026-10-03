@@ -24,6 +24,7 @@ from openpyxl.utils import get_column_letter
 CURRENCIES = ["INR", "USD"]
 RATE = "Rate (₹ per $1)"
 LINKED = "Added to Saree Cost"
+PURCHASED = "Purchase Recorded"
 
 PURCHASE_COLS = [
     "Date", "Supplier", "Invoice No", "Saree Code", "Description", "Fabric / Type",
@@ -34,7 +35,7 @@ SALE_COLS = [
     "Date", "Bill No", "Customer", "Phone", "Saree Code", "Description", "Qty",
     "Currency", RATE, "Price per Piece", "Discount", "Total Amount", "Amount Paid",
     "Balance Due", "Payment Mode", "Total ₹", "Total $", "Balance Due ₹", "Balance Due $",
-    "Cost of Goods ₹", "Cost of Goods $", "Profit ₹", "Profit $", "Notes",
+    "Cost of Goods ₹", "Cost of Goods $", "Profit ₹", "Profit $", PURCHASED, "Notes",
 ]
 EXPENSE_COLS = [
     "Date", "Category", "Description", "Saree Code", "Currency", RATE, "Amount",
@@ -59,7 +60,7 @@ DEFAULT_CURRENCY = {"Purchases": "INR", "Sales": "USD", "Expenses": "INR"}
 COMPUTED = {
     "Purchases": ["Total Cost", "Landed Cost per Piece", "Total Cost ₹", "Total Cost $"],
     "Sales": ["Total Amount", "Balance Due", "Total ₹", "Total $", "Balance Due ₹",
-              "Balance Due $", "Cost of Goods ₹", "Cost of Goods $", "Profit ₹", "Profit $"],
+              "Balance Due $", "Cost of Goods ₹", "Cost of Goods $", "Profit ₹", "Profit $", PURCHASED],
     "Expenses": ["Amount ₹", "Amount $", LINKED],
 }
 
@@ -67,7 +68,7 @@ QTY_COLS = {"Qty", "Qty Bought", "Qty Sold", "In Stock"}
 TEXT_COLS = {
     "Date", "Month", "Supplier", "Invoice No", "Saree Code", "Description", "Fabric / Type",
     "Colour", "Pricing", "Currency", "Bill No", "Customer", "Phone", "Payment Mode",
-    "Category", "Notes", LINKED,
+    "Category", "Notes", LINKED, PURCHASED,
 }
 
 
@@ -196,35 +197,50 @@ def avg_landed_cost(p: pd.DataFrame, e: pd.DataFrame) -> pd.DataFrame:
 
 
 def recalc_sales(s: pd.DataFrame, p: pd.DataFrame, e: pd.DataFrame) -> pd.DataFrame:
+    """Totals, cost and profit for each sale.
+
+    A saree can be sold before its purchase is entered. Its cost is then unknown, so
+    cost and profit stay 0 and "Purchase Recorded" says No; they fill in on the first
+    save after a purchase with the same Saree Code is added.
+    """
     s = s.copy()
     cost = avg_landed_cost(p, e)
+    s[PURCHASED] = s["Saree Code"].isin(_qty_bought(p).loc[lambda q: q > 0].index).map({True: "Yes", False: "No"})
     s["Total Amount"] = (s["Qty"] * s["Price per Piece"] - s["Discount"]).round(2)
     s["Balance Due"] = (s["Total Amount"] - s["Amount Paid"]).round(2)
     _both(s, "Total Amount", "Total ₹", "Total $")
     _both(s, "Balance Due", "Balance Due ₹", "Balance Due $")
     for c in ("₹", "$"):
         s[f"Cost of Goods {c}"] = (s["Qty"] * s["Saree Code"].map(cost[c]).fillna(0)).round(2)
-        s[f"Profit {c}"] = (s[f"Total {c}"] - s[f"Cost of Goods {c}"]).round(2)
+        s[f"Profit {c}"] = (s[f"Total {c}"] - s[f"Cost of Goods {c}"]).where(s[PURCHASED] == "Yes", 0).round(2)
     return s
 
 
 def build_stock(p: pd.DataFrame, s: pd.DataFrame, e: pd.DataFrame) -> pd.DataFrame:
-    if p.empty:
+    """One row per design — including ones sold before their purchase was entered
+    (they show Qty Bought 0 and a negative In Stock until the purchase is added)."""
+    if p.empty and s.empty:
         return _empty(STOCK_COLS)
-    info = p.groupby("Saree Code").agg(
+    bought = p.groupby("Saree Code").agg(
         **{"Description": ("Description", "last"), "Fabric / Type": ("Fabric / Type", "last"),
            "Qty Bought": ("Qty", "sum")}
     )
-    sold = s.groupby("Saree Code")["Qty"].sum() if not s.empty else pd.Series(dtype=float)
-    info["Qty Sold"] = sold.reindex(info.index).fillna(0)
+    sold_info = s.groupby("Saree Code").agg(Description=("Description", "last"), **{"Qty Sold": ("Qty", "sum")})
+    codes = bought.index.union(sold_info.index)
+    info = bought.reindex(codes)
+    info["Description"] = (info["Description"].replace("", None)
+                           .fillna(sold_info["Description"].reindex(codes)).fillna(""))
+    info["Fabric / Type"] = info["Fabric / Type"].fillna("")
+    info["Qty Bought"] = info["Qty Bought"].fillna(0)
+    info["Qty Sold"] = sold_info["Qty Sold"].reindex(codes).fillna(0)
     info["In Stock"] = info["Qty Bought"] - info["Qty Sold"]
     extra = extra_costs(p, e).reindex(info.index).fillna(0)
     cost = avg_landed_cost(p, e)
     for c in ("₹", "$"):
         info[f"Extra Costs {c}"] = extra[c].round(2)
         info[f"Avg Landed Cost {c}"] = cost[c].reindex(info.index).fillna(0).round(2)
-        info[f"Stock Value {c}"] = (info["In Stock"] * info[f"Avg Landed Cost {c}"]).round(2)
-    return info.reset_index()[STOCK_COLS].sort_values("Saree Code")
+        info[f"Stock Value {c}"] = (info["In Stock"].clip(lower=0) * info[f"Avg Landed Cost {c}"]).round(2)
+    return info.rename_axis("Saree Code").reset_index()[STOCK_COLS].sort_values("Saree Code")
 
 
 def general_expenses(e: pd.DataFrame) -> pd.DataFrame:
@@ -251,7 +267,7 @@ def build_summary(p: pd.DataFrame, s: pd.DataFrame, e: pd.DataFrame) -> pd.DataF
     if out.empty:
         return _empty(SUMMARY_COLS)
     for c in ("₹", "$"):
-        out[f"Gross Profit {c}"] = out[f"Sales {c}"] - out[f"Cost of Goods Sold {c}"]
+        out[f"Gross Profit {c}"] = by_month(s, f"Profit {c}").reindex(out.index).fillna(0)
         out[f"Net Profit {c}"] = out[f"Gross Profit {c}"] - out[f"Expenses {c}"]
     out = out.sort_index().reset_index(names="Month")
     return out[SUMMARY_COLS].round(2)

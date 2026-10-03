@@ -177,7 +177,7 @@ if page == "Dashboard":
 
     st.subheader("Overall")
     c = st.columns(4)
-    c[0].metric("Sarees in stock", f"{int(stock['In Stock'].sum()) if not stock.empty else 0}")
+    c[0].metric("Sarees in stock", f"{int(stock['In Stock'].clip(lower=0).sum()) if not stock.empty else 0}")
     c[1].metric("Stock value (at cost)", money(stock[f"Stock Value {S}"].sum() if not stock.empty else 0, S))
     c[2].metric("Money to collect", money(sales[f"Balance Due {S}"].clip(lower=0).sum(), S))
     c[3].metric("Total sales to date", money(sales[f"Total {S}"].sum(), S))
@@ -195,6 +195,12 @@ if page == "Dashboard":
         st.subheader("Running low (2 or fewer left)")
         st.dataframe(low[["Saree Code", "Description", "In Stock"]], hide_index=True)
 
+    pending_cost = sales[sales[xs.PURCHASED] == "No"]
+    if not pending_cost.empty:
+        codes = ", ".join(sorted(pending_cost["Saree Code"].unique()))
+        st.warning(f"{len(pending_cost)} sale(s) are for sarees whose purchase isn't entered yet ({codes}). "
+                   "Their profit is counted as 0 until you add those purchases under **New Purchase**.")
+
     if purchases.empty and sales.empty:
         st.info("Welcome! Start by adding a **New Purchase** (the sarees you bought), then record sales as they happen.")
 
@@ -202,12 +208,11 @@ if page == "Dashboard":
 # ---------------- New Sale ----------------
 elif page == "New Sale":
     st.title("Record a sale")
-    available = stock[stock["In Stock"] > 0] if not stock.empty else stock
-    if available.empty:
-        st.warning("No sarees in stock yet. Add a purchase first.")
-        st.stop()
-    avail = available.set_index("Saree Code")
+    designs = stock.set_index("Saree Code")
+    avail = designs[designs["In Stock"] > 0]
+    NOT_LISTED = "\0not-listed"
     labels = {code: f"{code} — {r['Description']} ({int(r['In Stock'])} left)" for code, r in avail.iterrows()}
+    labels[NOT_LISTED] = "➕ A saree not in stock yet (purchase not entered)"
 
     c1, c2, c3 = st.columns(3)
     d = c1.date_input("Date", date.today(), format="DD/MM/YYYY", key=f"s_date{n}")
@@ -223,8 +228,21 @@ elif page == "New Sale":
     sym = SYMBOL[cur]
 
     code = st.selectbox("Saree", list(labels), format_func=labels.get, key=f"s_code{n}")
-    cost_here = avail.loc[code, f"Avg Landed Cost {sym}"]
-    st.caption(md(f"Your cost for this saree: {money(cost_here, sym)} per piece (including shipping & customs)"))
+    if code == NOT_LISTED:
+        c1, c2 = st.columns([1, 2])
+        code = c1.text_input("Saree Code", key=f"s_newcode{n}", placeholder="KAN-001",
+                             help="Use this same code when you enter the purchase later").strip().upper()
+        desc = c2.text_input("Description", key=f"s_newdesc{n}", placeholder="e.g. Kanjivaram silk, red")
+        left = None  # no stock check — the purchase isn't entered yet
+    else:
+        desc, left = avail.loc[code, "Description"], int(avail.loc[code, "In Stock"])
+    known_cost = code in designs.index and designs.loc[code, "Qty Bought"] > 0
+    cost_here = designs.loc[code, f"Avg Landed Cost {sym}"] if known_cost else None
+    if known_cost:
+        st.caption(md(f"Your cost for this saree: {money(cost_here, sym)} per piece (including shipping & customs)"))
+    elif code:
+        st.caption("Its cost isn't known yet — the profit on this sale will show once you enter the "
+                   f"purchase with code **{code}** (New Purchase).")
     c1, c2, c3 = st.columns(3)
     qty = c1.number_input("Qty", min_value=1, value=1, step=1, key=f"s_qty{n}")
     price = c2.number_input(f"Price per piece ({sym})", min_value=0.0, step=5.0 if cur == "USD" else 100.0, key=f"s_price{n}")
@@ -235,22 +253,24 @@ elif page == "New Sale":
     notes = st.text_input("Notes", key=f"s_notes{n}")
 
     if price > 0 and rate > 0:
-        profit = total - qty * cost_here
-        st.info(md(f"**Total: {both(total, cur, rate)}** · Profit on this sale: {money(profit, sym)}"
+        profit = money(total - qty * cost_here, sym) if cost_here is not None else "shown after the purchase is entered"
+        st.info(md(f"**Total: {both(total, cur, rate)}** · Profit on this sale: {profit}"
                    + (f" · Still to collect: {money(total - paid, sym)}" if total - paid > 0 else "")))
 
     if st.button("Save sale", type="primary"):
-        left = int(avail.loc[code, "In Stock"])
-        if price <= 0:
+        if not code:
+            st.error("Please enter a Saree Code.")
+        elif price <= 0:
             st.error("Please enter the selling price.")
         elif rate <= 0:
             st.error("Please enter the exchange rate.")
-        elif qty > left:
-            st.error(f"Only {left} of {code} in stock.")
+        elif left is not None and qty > left:
+            st.error(f"Only {left} of {code} in stock. If you sold more than you've entered, "
+                     "choose \"A saree not in stock yet\" and type the code.")
         else:
             row = {
                 "Date": d, "Bill No": bill, "Customer": customer, "Phone": phone,
-                "Saree Code": code, "Description": avail.loc[code, "Description"], "Qty": qty,
+                "Saree Code": code, "Description": desc, "Qty": qty,
                 "Currency": cur, xs.RATE: rate, "Price per Piece": price, "Discount": discount,
                 "Amount Paid": paid, "Payment Mode": mode, "Notes": notes,
             }
@@ -274,7 +294,12 @@ elif page == "New Purchase":
         rate = rate_input(d, f"p_rate{n}")
     sym = SYMBOL[cur]
 
-    known = purchases.groupby("Saree Code")["Description"].last()
+    known = stock.set_index("Saree Code")["Description"]
+    waiting = stock[stock["Qty Bought"] == 0]
+    if not waiting.empty:
+        st.warning("Sold but purchase not entered yet: " + ", ".join(
+            f"**{r['Saree Code']}** ({int(r['Qty Sold'])} sold)" for _, r in waiting.iterrows())
+            + ". Use the same codes here so their cost and profit fill in.")
     if not known.empty:
         with st.expander(f"Saree codes already used ({len(known)})"):
             st.dataframe(known.reset_index(), hide_index=True)
@@ -366,8 +391,9 @@ elif page == "New Expense":
     desc = c1.text_input("Description", key=f"e_desc{n}")
     mode = c2.selectbox("Payment mode", PAYMENT_MODES[:-1], key=f"e_mode{n}")
 
-    codes = stock["Saree Code"].tolist()
-    names = dict(zip(stock["Saree Code"], stock["Description"]))
+    has_purchase = stock[stock["Qty Bought"] > 0]
+    codes = has_purchase["Saree Code"].tolist()
+    names = dict(zip(has_purchase["Saree Code"], has_purchase["Description"]))
     linked = st.multiselect(
         "For particular sarees? (optional)", codes, key=f"e_codes{n}",
         format_func=lambda c: f"{c} — {names.get(c, '')}",
@@ -403,13 +429,16 @@ elif page == "Stock":
         st.info("No purchases recorded yet.")
     else:
         show_all = st.toggle("Show sold-out designs too", value=False)
-        view = stock if show_all else stock[stock["In Stock"] > 0]
+        view = stock if show_all else stock[stock["In Stock"] != 0]
+        if (stock["In Stock"] < 0).any():
+            st.caption("A negative *In Stock* means more was sold than purchases entered — "
+                       "add the missing purchase with that Saree Code.")
         search = st.text_input("Search", placeholder="Code, description or fabric")
         if search:
             mask = view.apply(lambda r: search.lower() in " ".join(map(str, r.values)).lower(), axis=1)
             view = view[mask]
         c = st.columns(2)
-        c[0].metric("Pieces in stock", int(view["In Stock"].sum()))
+        c[0].metric("Pieces in stock", int(view["In Stock"].clip(lower=0).sum()))
         c[1].metric("Value at cost", money(view[f"Stock Value {S}"].sum(), S))
         cols = ["Saree Code", "Description", "Fabric / Type", "Qty Bought", "Qty Sold", "In Stock",
                 f"Extra Costs {S}", f"Avg Landed Cost {S}", f"Stock Value {S}"]

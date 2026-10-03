@@ -6,3 +6,6 @@ saree_books.xlsx
 *.tmp.xlsx
 backups/
 .streamlit/secrets.toml
+
+# local tool settings
+.claude/

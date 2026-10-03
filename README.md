@@ -35,6 +35,9 @@ The Excel file shows every amount in both ₹ and $, and the sidebar switch
    the real (landed) cost of each saree.
 2. **New Sale** — pick the saree, currency and price. It shows your cost and the profit
    before you save. If the customer pays later, untick "Paid in full".
+   **Sold something before entering its purchase?** Choose *"A saree not in stock yet"*
+   and type its code. The sale is saved; its profit shows as 0 (and the dashboard reminds
+   you) until you add the purchase with the same code — then cost and profit fill in by themselves.
 3. **New Expense** — packaging, courier, rent, etc. If an expense was for particular
    sarees (tailoring, fall-pico, courier for one lot…), pick their codes under
    *For particular sarees?* — it is added to those sarees' cost, spread over the pieces
